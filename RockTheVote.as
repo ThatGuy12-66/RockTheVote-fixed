@@ -291,6 +291,54 @@ bool canAutoStartRtv() {
 	return false;
 }
 
+// Picks up to 'count' unique random maps from 'pool'. Maps in 'exclude' (and the current/previous map)
+// are avoided when the pool is large enough, but if that leaves too few maps then the exclusions are relaxed.
+// Shuffles once and walks the list, so it always terminates (the old retry loops could spin forever when
+// every candidate was excluded, e.g. for players with no map history, freezing the server).
+array<string> pickRandomMaps(array<SortableMap>@ pool, uint count, array<string>@ exclude) {
+	array<string> picked;
+	array<uint> order;
+	
+	for (uint i = 0; i < pool.size(); i++) {
+		order.insertLast(i);
+	}
+	
+	// Fisher-Yates shuffle
+	for (uint i = order.size(); i > 1; i--) {
+		uint j = Math.RandomLong(0, i-1);
+		uint tmp = order[i-1];
+		order[i-1] = order[j];
+		order[j] = tmp;
+	}
+	
+	bool enoughInPool = pool.size() > count*2;
+	
+	// pass 0 respects the exclusions, pass 1 only fills in any remaining slots
+	for (uint pass = 0; pass < 2 && picked.size() < count; pass++) {
+		for (uint i = 0; i < order.size() && picked.size() < count; i++) {
+			string map = pool[order[i]].map;
+			
+			if (picked.find(map) != -1) {
+				continue;
+			}
+			
+			bool wasPlayedSuperRecently = g_Engine.mapname == map || g_previous_map == map;
+			bool excluded = exclude.find(map) != -1;
+			
+			if (enoughInPool and wasPlayedSuperRecently) {
+				continue;
+			}
+			if (pass == 0 and excluded and enoughInPool) {
+				continue;
+			}
+			
+			picked.insertLast(map);
+		}
+	}
+	
+	return picked;
+}
+
 void createRtvMenu(dictionary args) {
 	array<string> rtvList;
 	if (!g_generating_rtv_list) {
@@ -308,10 +356,8 @@ void createRtvMenu(dictionary args) {
 	rtvList.insertLast(g_MapCycle.GetNextMap());
 	
 	array<string> shuffleChoices;
-	array<string> randChoices;
-	array<string> goodChoices;
 	uint firstPlayedMapIdx = 0;
-	uint mapsNeeded = maxMenuItems - rtvList.size();
+	uint mapsNeeded = rtvList.size() < maxMenuItems ? maxMenuItems - rtvList.size() : 0;
 	
 	// prevent the same maps always being shown for players who have little history
 	for (uint i = 0; i < g_randomRtvChoices.size(); i++) {
@@ -322,29 +368,13 @@ void createRtvMenu(dictionary args) {
 		shuffleChoices.insertLast(g_randomRtvChoices[i].map);
 	}
 	
-	for (uint i = 0; i < g_randomCycleMaps.size() && i < mapsNeeded; i++) {
-		string map = g_randomCycleMaps[Math.RandomLong(0, g_randomCycleMaps.size()-1)].map;
-		bool alreadyAdded = goodChoices.find(map) != -1 || shuffleChoices.find(map) != -1;
-		bool enoughInPool = g_randomCycleMaps.size() > mapsNeeded*2;
-		bool wasPlayedSuperRecently = g_Engine.mapname == map || g_previous_map == map;
-		if ((alreadyAdded || wasPlayedSuperRecently) && enoughInPool) {
-			i--; // try again
-			continue;
-		}
-		goodChoices.insertLast(map);
-	}
+	array<string> goodChoices = pickRandomMaps(g_randomCycleMaps, mapsNeeded, shuffleChoices);
 	
-	for (uint i = 0; i < g_randomRtvChoices.size() && i < mapsNeeded; i++) {
-		string map = g_randomRtvChoices[Math.RandomLong(0, g_randomRtvChoices.size()-1)].map;
-		bool alreadyAdded = goodChoices.find(map) != -1 || randChoices.find(map) != -1 || shuffleChoices.find(map) != -1;
-		bool enoughInPool = g_randomRtvChoices.size() > mapsNeeded*2;
-		bool wasPlayedSuperRecently = g_Engine.mapname == map || g_previous_map == map;
-		if ((alreadyAdded || wasPlayedSuperRecently) && enoughInPool) {
-			i--; // try again
-			continue;
-		}
-		randChoices.insertLast(map);
+	array<string> randExclude = shuffleChoices;
+	for (uint i = 0; i < goodChoices.size(); i++) {
+		randExclude.insertLast(goodChoices[i]);
 	}
+	array<string> randChoices = pickRandomMaps(g_randomRtvChoices, mapsNeeded, randExclude);
 	
 	// rtv layout for when there are no noms
 	// 1 - (exit)
