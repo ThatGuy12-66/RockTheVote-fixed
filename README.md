@@ -1,4 +1,7 @@
-# RockTheVote
+# RockTheVote - Fixed
+A fix of wootguy's RTV plugin that caused a crash when typing the rtv command
+
+# Original Description
 A rewrite of the [RockTheVote plugin by MrOats](https://github.com/MrOats/AngelScript_SC_Plugins/wiki/RockTheVote.as), with new features.  
 
 
